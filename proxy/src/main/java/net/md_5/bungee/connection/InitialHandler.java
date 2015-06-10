@@ -13,6 +13,9 @@ import java.util.logging.Level;
 import javax.crypto.SecretKey;
 
 import com.google.gson.Gson;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.URL;
 import java.util.concurrent.TimeUnit;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +49,7 @@ import net.md_5.bungee.protocol.packet.EncryptionResponse;
 import net.md_5.bungee.protocol.packet.EncryptionRequest;
 import net.md_5.bungee.protocol.packet.Kick;
 import net.md_5.bungee.api.AbstractReconnectHandler;
+import net.md_5.bungee.api.connection.Server;
 import net.md_5.bungee.api.event.PlayerHandshakeEvent;
 import net.md_5.bungee.api.event.PreLoginEvent;
 import net.md_5.bungee.jni.cipher.BungeeCipher;
@@ -347,12 +351,29 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                 {
                     return;
                 }
-                if ( onlineMode )
+                /*
+                 Checa se ele pagou
+                 */
+                boolean pagou;
+                try
+                {
+                    URL url = new URL( "https://minecraft.net/haspaid.jsp?user=" + getName() );
+
+                    // Read all the text returned by the server
+                    BufferedReader in = new BufferedReader( new InputStreamReader( url.openStream() ) );
+                    String str = in.readLine();
+                    pagou = Boolean.valueOf( str );
+                } catch ( Exception ex )
+                {
+                    pagou = true;
+                }
+
+                if ( pagou )
                 {
                     unsafe().sendPacket( request = EncryptionUtil.encryptRequest() );
                 } else
                 {
-                    finish();
+                    finish( bungee.getServerInfo( "login" ) );
                 }
                 thisState = State.ENCRYPT;
             }
@@ -399,7 +420,7 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                     {
                         loginProfile = obj;
                         uniqueId = Util.getUUID( obj.getId() );
-                        finish();
+                        finish( bungee.getServerInfo( "lobby" ) );
                         return;
                     }
                     disconnect( "Not authenticated with Minecraft.net" );
@@ -414,7 +435,7 @@ public class InitialHandler extends PacketHandler implements PendingConnection
         HttpClient.get( authURL, ch.getHandle().eventLoop(), handler );
     }
 
-    private void finish()
+    private void finish(final ServerInfo servidor)
     {
         if ( isOnlineMode() )
         {
@@ -433,7 +454,8 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                 // TODO See #1218
                 oldID.disconnect( bungee.getTranslation( "already_connected" ) );
             }
-        } else {
+        } else
+        {
             // In offline mode the existing user stays and we kick the new one
             ProxiedPlayer oldName = bungee.getPlayer( getName() );
             if ( oldName != null )
@@ -489,20 +511,7 @@ public class InitialHandler extends PacketHandler implements PendingConnection
 
                             ch.getHandle().pipeline().get( HandlerBoss.class ).setHandler( new UpstreamBridge( bungee, userCon ) );
 
-                            ServerInfo server;
-                            if ( bungee.getReconnectHandler() != null )
-                            {
-                                server = bungee.getReconnectHandler().getServer( userCon );
-                            } else
-                            {
-                                server = AbstractReconnectHandler.getForcedHost( InitialHandler.this );
-                            }
-                            if ( server == null )
-                            {
-                                server = bungee.getServerInfo( listener.getDefaultServer() );
-                            }
-
-                            userCon.connect( server, null, true );
+                            userCon.connect( servidor, null, true );
 
                             thisState = State.FINISHED;
                         }
@@ -537,7 +546,7 @@ public class InitialHandler extends PacketHandler implements PendingConnection
                 @Override
                 public void run()
                 {
-                    if (thisState != State.STATUS && thisState != State.PING)
+                    if ( thisState != State.STATUS && thisState != State.PING )
                     {
                         unsafe().sendPacket( new Kick( ComponentSerializer.toString( reason ) ) );
                     }
